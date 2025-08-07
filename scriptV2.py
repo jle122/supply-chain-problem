@@ -14,12 +14,12 @@ class Shipment:
         self.date_made = date_made
         self.amount = amount
     
-    def sell_by_date(self):
+    def sell_by_date(self): # the expiration date (calculated as 8 months from date_made)
         return self.date_made + timedelta(days=240)
 
 class SupplyDemand:
     '''attributes of a forecast'''
-
+    '''at this current date, what is the demand needed?'''
     demand: int # projected quota
     current_date: date
 
@@ -35,30 +35,15 @@ def find_available_and_expired_at_single_date(shipments: List[Shipment], date: d
     available_shipments = []
     expired_shipments = []
 
-    for i in shipments:
+    for i in shipments: # going through current stock
+        # if the expiration date is later than input date and the date it was made is less than the input date
+        # add it to available shipments
         if i.sell_by_date() >= date and i.date_made < date:
             available_shipments.append(i)
-        else:
+        else: # otherwise, add it to expired shipments
             expired_shipments.append(i)
 
     return (available_shipments, expired_shipments)
-
-def find_available(shipments: List[Shipment], forecast: List[SupplyDemand]):
-    '''Input: List of shipments and a list of dates (probably following a 12 month forecast)'''
-    '''Given a supply-demand chart of a date forecast, and available stock, find how much available based on the forecast.'''
-
-    projected_stock = {}
-
-    for i in forecast:
-        (available_shipments, expired_shipments) = find_available_and_expired_at_single_date(shipments, i.date)
-        total_stock = 0
-
-        for j in available_shipments:
-            total_stock += j.amount
-            
-        projected_stock[i.date] = (total_stock, available_shipments, expired_shipments)
-
-    return projected_stock
 
 def calculate_order_amount(shipments: List[Shipment], forecast: List[SupplyDemand]):
     '''input the dictionary outputted by the previous algorithm'''
@@ -66,59 +51,43 @@ def calculate_order_amount(shipments: List[Shipment], forecast: List[SupplyDeman
 
     output_dict = {} # output value
     shipments1 = shipments
+
+    # sort the chart by earliest date
     forecast = sorted(forecast, key=lambda s: s.current_date)
+
+    # go through the forecast
     for i in forecast:
         demand = i.demand 
+        # call the previous function to find all available shipments at the date
         (available_shipments, expired_shipments) = find_available_and_expired_at_single_date(shipments1, i.current_date)
 
-        if available_shipments == []:
+        if available_shipments == []: # if there are no available shipments, set output to be demand
             output_dict[i.current_date] = demand
-        else: 
+        else: # otherwise...
+            # sort the available shipments by earliest expiration date
             available_shipments = sorted(available_shipments, key=lambda s: s.sell_by_date())
-            stock = 0
-            while stock < demand:
-                if available_shipments != []:
-                    current = available_shipments[0]
-                    if stock + current.amount <= demand:
-                        stock += current.amount
-                        available_shipments.pop(0)
-                        shipments1.pop(0)
-                    else:
-                        for j in shipments1:
-                            if j == current:
-                                current.amount = current.amount - (demand - stock)
-                                j = current
-                                break
-                        stock = demand
 
-                else:
+            stock = 0 # initialize a counter variable to track current stock
+            while stock < demand:
+                if available_shipments != []: # if available shipments is not empty
+                    current = available_shipments[0]
+
+                    if stock + current.amount <= demand: # if the counter is under demand, completely sell the shipment
+                        stock += current.amount
+                        # remove this shipment (consider it completely shipped out)
+                        available_shipments.pop(0)
+                        shipments1.remove(current)
+                    else: # otherwise, partially sell the shipment based on whatever is needed to meet demand
+                        current.amount = current.amount - (demand - stock)
+                        stock = demand # demand is met with part of a shipment
+
+                else: # if there are no more available shipments, end the prematurely end the loop
                     break
+
+            # set the number at the current date to be either 0 (demand is met) or demand - stock
+            # if the number is not 0, the amount shown is the amount needed to meet demand based on current supply
             output_dict[i.current_date] = max(0,demand - stock)
+
     # Sort keys in descending order and rebuild the dictionary
     output_dict = dict(sorted(output_dict.items()))
     return output_dict
-
-# test cases
-shipments = [
-    Shipment("A100", date(2024, 12, 1), 40),  # Sell-by: 2025-07-29
-    Shipment("B200", date(2025, 1, 15), 20),  # Sell-by: 2025-09-12
-    Shipment("C300", date(2024, 10, 1), 30),  # Sell-by: 2025-06-28
-    Shipment("D400", date(2025, 2, 1), 10),   # Sell-by: 2025-09-29
-    Shipment("E500", date(2025, 3, 15), 25),  # Sell-by: 2025-11-10
-    Shipment("F600", date(2023, 9, 1), 15),   # Sell-by: 2024-04-28 — expired early
-    Shipment("G700", date(2025, 5, 1), 50),   # Sell-by: 2026-01-27
-    Shipment("H800", date(2024, 8, 20), 35),  # Sell-by: 2025-04-17
-]
-
-forecast = [
-    SupplyDemand(50, date(2025, 3, 1)),   # Solid coverage from first few shipments
-    SupplyDemand(40, date(2025, 5, 1)),   # Might consume mid-expiration inventory
-    SupplyDemand(25, date(2025, 8, 1)),   # Some early shipments may expire
-    SupplyDemand(60, date(2025, 10, 1)),  # Likely needs newer inventory
-    SupplyDemand(35, date(2026, 1, 1)),   # Will test long shelf life
-    SupplyDemand(45, date(2024, 11, 15)), # Tests pre-2025 inventory
-]
-def test1():
-    return calculate_order_amount(shipments, forecast)
-
-print(test1())
